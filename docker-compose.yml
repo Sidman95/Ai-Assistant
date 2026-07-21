@@ -1,0 +1,72 @@
+services:
+  web:
+    build: ./backend
+    restart: unless-stopped
+    command: uvicorn app.web.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    environment:
+      - DB_PATH=/data/assistant.sqlite3
+      - FILES_DIR=/data/files
+    volumes:
+      - app_data:/data
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  bot:
+    build: ./backend
+    restart: unless-stopped
+    command: python -m app.bot.main
+    env_file: .env
+    environment:
+      - DB_PATH=/data/assistant.sqlite3
+      - FILES_DIR=/data/files
+    volumes:
+      - app_data:/data
+    depends_on:
+      - web
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    depends_on:
+      - web
+
+  # Изолированный бэкап (NFR-4): работает под отдельным пользователем,
+  # БД смонтирована только на чтение, каталог бэкапов НЕ доступен web/bot.
+  backup:
+    build: ./backup
+    restart: unless-stopped
+    user: "12000:12000"
+    env_file: .env
+    environment:
+      - DB_PATH=/data/assistant.sqlite3
+    volumes:
+      - app_data:/data:ro
+      - backup_data:/backups
+
+  # Одноразовый контейнер для выпуска/продления TLS-сертификата (см. docs/DEPLOYMENT.md)
+  certbot:
+    image: certbot/certbot
+    profiles: ["tls"]
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+
+volumes:
+  app_data:
+  backup_data:
+  certbot_conf:
+  certbot_www:

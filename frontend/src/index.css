@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-page text-ink;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
