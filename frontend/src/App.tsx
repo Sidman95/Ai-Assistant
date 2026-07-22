@@ -55,6 +55,15 @@ export default function App() {
     else setSpaceProjectId(null);
   }, []);
 
+  // Переход по вкладке: если открыто пространство проекта — сначала выходим из него
+  const goTab = useCallback((t: Tab) => {
+    if (hashProjectId() !== null) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setSpaceProjectId(null);
+    }
+    setTab(t);
+  }, []);
+
   useEffect(() => {
     api
       .get<{ username: string }>("/api/auth/me")
@@ -101,7 +110,7 @@ export default function App() {
       {/* Верхняя панель */}
       <header className="flex items-center gap-4 px-5 py-4 md:px-10">
         <button
-          onClick={() => setTab("dashboard")}
+          onClick={() => goTab("dashboard")}
           className="flex items-center gap-2.5"
           aria-label="Дашборд"
         >
@@ -115,7 +124,7 @@ export default function App() {
           {TABS.map((t) => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => goTab(t.id)}
               className={`rounded-full px-4 py-2 text-[13.5px] transition-colors lg:px-[18px] ${
                 tab === t.id ? "bg-accent font-semibold text-white" : "text-ink-2 hover:text-ink"
               }`}
@@ -134,9 +143,9 @@ export default function App() {
             <Icon name={resolved === "dark" ? "sun" : "moon"} size={17} />
           </button>
           <button
-            onClick={() => setTab("settings")}
+            onClick={() => goTab("settings")}
             className={`flex h-9 w-9 items-center justify-center rounded-full border border-line2 bg-card ${
-              tab === "settings" ? "text-accent-text" : "text-muted hover:text-ink"
+              tab === "settings" && spaceProjectId === null ? "text-accent-text" : "text-muted hover:text-ink"
             }`}
             title="Настройки"
           >
@@ -213,7 +222,7 @@ export default function App() {
         {TABS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => goTab(t.id)}
             className={`flex h-[46px] w-[46px] items-center justify-center rounded-full ${
               tab === t.id ? "bg-accent text-white" : "text-muted"
             }`}
