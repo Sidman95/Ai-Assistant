@@ -15,12 +15,55 @@ fail() { printf '\033[1;31mОШИБКА: %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ -f docker-compose.yml ] || fail "запустите скрипт из каталога проекта (рядом с docker-compose.yml)"
 
-# ---------- 1. Docker ----------
+# нужен root для установки пакетов; без root используем sudo
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+  if command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else
+    fail "запустите скрипт под root или установите sudo"
+  fi
+fi
+
+# ---------- 1. Docker и Docker Compose ----------
 if ! command -v docker >/dev/null 2>&1; then
   say "Docker не найден — устанавливаю"
-  curl -fsSL https://get.docker.com | sh
+  curl -fsSL https://get.docker.com | $SUDO sh
 fi
-docker compose version >/dev/null 2>&1 || fail "docker compose недоступен (нужен Docker с плагином compose v2)"
+
+# демон Docker должен быть запущен
+if command -v systemctl >/dev/null 2>&1; then
+  $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+fi
+
+# определяем команду compose: v2-плагин («docker compose») или v1 («docker-compose»)
+detect_compose() {
+  if $SUDO docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD=($SUDO docker compose); return 0
+  elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD=($SUDO docker-compose); return 0
+  fi
+  return 1
+}
+
+if ! detect_compose; then
+  say "Docker Compose не найден — устанавливаю плагин compose v2"
+  # 1) через пакетный менеджер
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get update -qq && $SUDO apt-get install -y docker-compose-plugin >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    $SUDO dnf install -y docker-compose-plugin >/dev/null 2>&1 || true
+  fi
+  # 2) если не помогло — ставим бинарь плагина напрямую с GitHub
+  if ! $SUDO docker compose version >/dev/null 2>&1; then
+    plugin_dir=/usr/local/lib/docker/cli-plugins
+    $SUDO mkdir -p "$plugin_dir"
+    $SUDO curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
+      -o "$plugin_dir/docker-compose" && $SUDO chmod +x "$plugin_dir/docker-compose" || true
+  fi
+  detect_compose || fail "не удалось установить Docker Compose; поставьте вручную: $SUDO apt-get install docker-compose-plugin"
+fi
+
+dc() { "${COMPOSE_CMD[@]}" "$@"; }
+say "Использую Docker Compose: ${COMPOSE_CMD[*]}"
 
 # ---------- 2. Конфигурация .env ----------
 if [ ! -f .env ]; then
@@ -68,17 +111,17 @@ done
 
 # ---------- 4. Сборка и запуск ----------
 say "Собираю и запускаю контейнеры (первый раз занимает несколько минут)"
-docker compose up -d --build
+dc up -d --build
 
 say "Статус сервисов"
-docker compose ps
+dc ps
 
 # ---------- 5. Проверка ----------
 sleep 5
-if docker compose exec -T web python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" >/dev/null 2>&1; then
+if dc exec -T web python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" >/dev/null 2>&1; then
   echo "API отвечает ✔"
 else
-  echo "⚠ API пока не отвечает — посмотрите логи: docker compose logs web"
+  echo "⚠ API пока не отвечает — посмотрите логи: ${COMPOSE_CMD[*]} logs web"
 fi
 
 DOMAIN_VAL=$(grep '^DOMAIN=' .env | cut -d= -f2)
@@ -88,6 +131,6 @@ echo "1. Напишите вашему боту в Telegram: /start"
 echo "2. Веб-кабинет: http://${DOMAIN_VAL:-${IP:-<IP-сервера>}}/"
 if [ -n "$DOMAIN_VAL" ]; then
   echo "3. Для HTTPS выпустите сертификат (см. docs/DEPLOYMENT.md, шаг 6):"
-  echo "   docker compose run --rm certbot certonly --webroot -w /var/www/certbot -d $DOMAIN_VAL --email ВАШ_EMAIL --agree-tos --no-eff-email"
-  echo "   docker compose restart nginx"
+  echo "   ${COMPOSE_CMD[*]} run --rm certbot certonly --webroot -w /var/www/certbot -d $DOMAIN_VAL --email ВАШ_EMAIL --agree-tos --no-eff-email"
+  echo "   ${COMPOSE_CMD[*]} restart nginx"
 fi
