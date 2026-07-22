@@ -29,6 +29,7 @@ const PRIORITY_COLOR: Record<string, string> = {
 interface Props {
   itemId: number | null; // null => создание
   createType: ItemType;
+  presetProjectId?: number | null; // создание из пространства проекта
   onClose: (changed: boolean) => void;
 }
 
@@ -48,7 +49,7 @@ function Row({ label, children, last }: { label: string; children: ReactNode; la
 const selectCls =
   "w-full cursor-pointer appearance-none rounded-md border-none bg-transparent py-2 text-sm outline-none";
 
-export default function ItemEditor({ itemId, createType, onClose }: Props) {
+export default function ItemEditor({ itemId, createType, presetProjectId, onClose }: Props) {
   const [item, setItem] = useState<Item | null>(null);
   const [loading, setLoading] = useState(itemId !== null);
   const [error, setError] = useState("");
@@ -63,7 +64,7 @@ export default function ItemEditor({ itemId, createType, onClose }: Props) {
   const [delegatedTo, setDelegatedTo] = useState("");
   const [noteDate, setNoteDate] = useState("");
   const [recurrence, setRecurrence] = useState("none");
-  const [projectId, setProjectId] = useState<number | "">("");
+  const [projectId, setProjectId] = useState<number | "">(presetProjectId ?? "");
   const [itemTags, setItemTags] = useState<string[]>([]);
 
   const [allTags, setAllTags] = useState<Tag[]>([]);

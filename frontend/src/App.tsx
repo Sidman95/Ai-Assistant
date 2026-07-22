@@ -5,11 +5,17 @@ import { Icon } from "./icons";
 import ItemEditor from "./ItemEditor";
 import CardsPage from "./CardsPage";
 import Login from "./Login";
+import ProjectSpace from "./ProjectSpace";
 import ProjectsPage from "./ProjectsPage";
 import SettingsPage from "./SettingsPage";
 import TasksPage from "./TasksPage";
 import { useTheme } from "./theme";
 import { ItemType } from "./types";
+
+function hashProjectId(): number | null {
+  const m = window.location.hash.match(/^#\/project\/(\d+)$/);
+  return m ? Number(m[1]) : null;
+}
 
 type Tab = "dashboard" | "task" | "idea" | "note" | "project" | "settings";
 
@@ -28,8 +34,26 @@ export default function App() {
   const [editorItemId, setEditorItemId] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [createType, setCreateType] = useState<ItemType>("task");
+  const [createProjectId, setCreateProjectId] = useState<number | null>(null);
+  const [spaceProjectId, setSpaceProjectId] = useState<number | null>(hashProjectId);
   const [refreshKey, setRefreshKey] = useState(0);
   const { resolved, setMode } = useTheme();
+
+  // Пространство проекта живёт по адресу #/project/N — работает «назад» и прямые ссылки
+  useEffect(() => {
+    const onHash = () => setSpaceProjectId(hashProjectId());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const openProject = useCallback((id: number) => {
+    window.location.hash = `#/project/${id}`;
+  }, []);
+
+  const closeProject = useCallback(() => {
+    if (hashProjectId() !== null) window.history.back();
+    else setSpaceProjectId(null);
+  }, []);
 
   useEffect(() => {
     api
@@ -46,8 +70,9 @@ export default function App() {
     setEditorOpen(true);
   }, []);
 
-  const openCreate = useCallback((type: ItemType) => {
+  const openCreate = useCallback((type: ItemType, projectId: number | null = null) => {
     setCreateType(type);
+    setCreateProjectId(projectId);
     setEditorItemId(null);
     setEditorOpen(true);
   }, []);
@@ -130,6 +155,16 @@ export default function App() {
       {/* Контент */}
       <main className="mx-auto w-full max-w-[1160px] px-4 pt-2 md:px-10">
         <ErrorBoundary>
+          {spaceProjectId !== null ? (
+            <ProjectSpace
+              projectId={spaceProjectId}
+              onBack={closeProject}
+              onOpenItem={openItem}
+              onCreateInProject={(t) => openCreate(t, spaceProjectId)}
+              refreshKey={refreshKey}
+            />
+          ) : (
+            <>
           {tab === "dashboard" && (
             <Dashboard
               username={username}
@@ -150,15 +185,17 @@ export default function App() {
             />
           )}
           {tab === "project" && (
-            <ProjectsPage onOpenItem={openItem} onCreate={() => openCreate("project")} refreshKey={refreshKey} />
+            <ProjectsPage onOpenItem={openProject} onCreate={() => openCreate("project")} refreshKey={refreshKey} />
           )}
           {tab === "settings" && <SettingsPage />}
+            </>
+          )}
         </ErrorBoundary>
       </main>
 
       {/* Мобильная навигация (из макета: плавающий pill + FAB) */}
       <button
-        onClick={() => openCreate(fabType)}
+        onClick={() => openCreate(spaceProjectId !== null ? "task" : fabType, spaceProjectId)}
         className="fixed bottom-[104px] right-5 z-10 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-white md:hidden"
         style={{ boxShadow: "0 6px 20px rgba(42,120,214,0.45)" }}
         aria-label="Создать"
@@ -191,6 +228,7 @@ export default function App() {
         <ItemEditor
           itemId={editorItemId}
           createType={createType}
+          presetProjectId={createProjectId}
           onClose={(changed) => {
             setEditorOpen(false);
             if (changed) setRefreshKey((k) => k + 1);
