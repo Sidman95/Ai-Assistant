@@ -62,16 +62,35 @@ class LLMClient:
         self.model = model
         self.client = OpenAI(base_url=base_url, api_key=api_key or "unset")
 
-    def _chat(self, system: str, user: str, temperature: float = 0.1, max_tokens: int = 2000) -> str:
-        response = self.client.chat.completions.create(
+    def _chat(
+        self,
+        system: str,
+        user: str,
+        temperature: float = 0.1,
+        max_tokens: int = 2000,
+        json_mode: bool = False,
+    ) -> str:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        kwargs = dict(
             model=self.model,
             temperature=temperature,
             max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=messages,
         )
+        # JSON-режим: заставляет модель вернуть строго объект JSON (без прозы).
+        # Если провайдер не поддерживает response_format — повторяем без него.
+        if json_mode:
+            try:
+                response = self.client.chat.completions.create(
+                    response_format={"type": "json_object"}, **kwargs
+                )
+                return (response.choices[0].message.content or "").strip()
+            except Exception as e:  # noqa: BLE001
+                logger.info("response_format не поддержан (%s) — повтор без него", e)
+        response = self.client.chat.completions.create(**kwargs)
         return (response.choices[0].message.content or "").strip()
 
     # ---------- Разбор ввода (FR-4, FR-5, FR-6) ----------
@@ -84,16 +103,27 @@ class LLMClient:
             f"Существующие проекты: {', '.join(projects) or '—'}\n\n"
             f"Сообщение пользователя:\n{text}"
         )
-        raw = self._chat(SYSTEM_PROMPT, user_msg)
+        raw = self._chat(SYSTEM_PROMPT, user_msg, json_mode=True, max_tokens=1500)
         parsed = _extract_json(raw)
         if parsed is None or "intent" not in parsed:
-            logger.warning("LLM вернул невалидный JSON: %r", raw[:500])
-            # Фолбэк (ТЗ §4.1): создаём заметку, чтобы ничего не потерять
-            return {
-                "intent": "new_item",
-                "items": [{"type": "note", "title": text[:120], "description": text}],
-                "_fallback": True,
-            }
+            # Одна строгая повторная попытка перед фолбэком
+            logger.info("Первый ответ не JSON, повтор со строгим требованием")
+            raw2 = self._chat(
+                SYSTEM_PROMPT,
+                user_msg + "\n\nВЕРНИ СТРОГО валидный JSON по схеме. Без пояснений, без текста вокруг.",
+                temperature=0.0,
+                max_tokens=1500,
+                json_mode=True,
+            )
+            parsed = _extract_json(raw2)
+            if parsed is None or "intent" not in parsed:
+                logger.warning("LLM вернул невалидный JSON: %r", (raw or "")[:800])
+                # Фолбэк (ТЗ §4.1): создаём заметку, чтобы ничего не потерять
+                return {
+                    "intent": "new_item",
+                    "items": [{"type": "note", "title": text[:120], "description": text}],
+                    "_fallback": True,
+                }
         return parsed
 
     def extract_edit(self, item_json: dict, instruction: str, today: str) -> dict:
@@ -102,7 +132,7 @@ class LLMClient:
             f"Запись: {json.dumps(item_json, ensure_ascii=False)}\n"
             f"Инструкция: {instruction}"
         )
-        raw = self._chat(EDIT_PROMPT, user_msg)
+        raw = self._chat(EDIT_PROMPT, user_msg, json_mode=True, max_tokens=800)
         parsed = _extract_json(raw)
         if parsed and isinstance(parsed.get("changes"), dict):
             return parsed["changes"]
@@ -138,24 +168,37 @@ class LLMClient:
         return self._chat(system, json.dumps(stats, ensure_ascii=False), temperature=0.4)
 
 
+def _try_load(text: str) -> dict | None:
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
 def _extract_json(raw: str) -> dict | None:
-    """Строгий парсинг с зачисткой типичных обрамлений (```json ... ```)."""
+    """Терпимый парсинг: снимает обрамление ```json```, вырезает объект,
+    убирает висячие запятые. Возвращает dict или None."""
     if not raw:
         return None
     cleaned = raw.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        data = json.loads(cleaned)
-        return data if isinstance(data, dict) else None
-    except json.JSONDecodeError:
-        pass
-    # последняя попытка: первый '{' … последний '}'
+
+    # 1) как есть
+    data = _try_load(cleaned)
+    if data is not None:
+        return data
+
+    # 2) вырезать от первого '{' до последнего '}'
     start, end = cleaned.find("{"), cleaned.rfind("}")
-    if 0 <= start < end:
-        try:
-            data = json.loads(cleaned[start : end + 1])
-            return data if isinstance(data, dict) else None
-        except json.JSONDecodeError:
-            return None
-    return None
+    if not (0 <= start < end):
+        return None
+    candidate = cleaned[start : end + 1]
+    data = _try_load(candidate)
+    if data is not None:
+        return data
+
+    # 3) убрать висячие запятые перед } и ]
+    candidate2 = re.sub(r",(\s*[}\]])", r"\1", candidate)
+    return _try_load(candidate2)
