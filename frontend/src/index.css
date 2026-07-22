@@ -2,7 +2,118 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Дизайн-токены из макета «Редизайн» (направление 2a): светлая тема */
+:root {
+  color-scheme: light;
+  --page: #fbfbfa;
+  --card: #ffffff;
+  --border: #eceae4;
+  --border2: #e7e5df;
+  --row: #f4f3f0;
+  --divider: #f0eee8;
+  --input: #fbfbfa;
+  --ink: #1c1b19;
+  --ink2: #56544f;
+  --muted: #918f88;
+  --accent: #2a78d6;
+  --accent-text: #2a78d6;
+  --accent-soft: #eaf2fc;
+  --check: #c9c6be;
+  --dashed: #d8d6cf;
+  --green: #4aa06c;
+  --green-soft: #e9f4ed;
+  --amber: #c78a3b;
+  --amber-soft: #f5efe5;
+  --violet: #8a6fc9;
+  --violet-soft: #f1edfa;
+  --red: #c0392b;
+  --red-soft: #f9ecea;
+  --orange: #b7791f;
+  --orange-soft: #f7f0e1;
+  --chart-bar: #dcebfb;
+  --avatar: #e5e3dc;
+  --overlay: rgba(20, 20, 18, 0.45);
+  --card-shadow: 0 1px 3px rgba(30, 30, 25, 0.04);
+  --btn-shadow: 0 2px 8px rgba(42, 120, 214, 0.25);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #131417;
+  --card: #1b1d21;
+  --border: #26282d;
+  --border2: #2a2c31;
+  --row: #17181c;
+  --divider: #222429;
+  --input: #17181c;
+  --ink: #ececea;
+  --ink2: #9d9fa6;
+  --muted: #6d6f76;
+  --accent: #2a78d6;
+  --accent-text: #5b9ce6;
+  --accent-soft: #243447;
+  --check: #55575e;
+  --dashed: #3a3c42;
+  --green: #7cc79a;
+  --green-soft: rgba(124, 199, 154, 0.13);
+  --amber: #d9a662;
+  --amber-soft: rgba(217, 166, 98, 0.13);
+  --violet: #a78fe0;
+  --violet-soft: rgba(167, 143, 224, 0.15);
+  --red: #e06c6c;
+  --red-soft: rgba(224, 108, 108, 0.13);
+  --orange: #d9a662;
+  --orange-soft: rgba(217, 166, 98, 0.13);
+  --chart-bar: #243447;
+  --avatar: #26282d;
+  --overlay: rgba(10, 11, 13, 0.55);
+  --card-shadow: none;
+  --btn-shadow: 0 2px 10px rgba(42, 120, 214, 0.35);
+}
+
 body {
-  @apply bg-page text-ink;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+input,
+select,
+textarea,
+button {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Тумблер (настройки) */
+.switch {
+  width: 44px;
+  height: 26px;
+  border-radius: 99px;
+  background: var(--border2);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  border: none;
+  padding: 0;
+}
+.switch[data-on="true"] {
+  background: var(--accent);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.switch[data-on="true"]::after {
+  transform: translateX(18px);
 }
