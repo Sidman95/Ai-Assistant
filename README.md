@@ -51,6 +51,14 @@ Telegram ──▶ bot (aiogram) ──┐
 
 ## Быстрый старт
 
+Автоматически (скрипт сам поставит Docker, спросит токены и запустит всё):
+
+```bash
+git clone <репозиторий> ai-assistant && cd ai-assistant && ./deploy.sh
+```
+
+Или вручную:
+
 ```bash
 git clone <репозиторий> && cd Ai-Assistant
 cp .env.example .env
