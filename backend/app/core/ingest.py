@@ -44,16 +44,33 @@ def resolve_target(
 ) -> list[Item]:
     """Поиск записи по свободному описанию (для смены статуса/правки).
 
-    Сначала пробуем #id, затем поиск по словам заголовка.
+    Порядок: явная ссылка #N → «задача N» целиком → поиск по словам заголовка.
     """
     target_text = (target_text or "").strip()
     if not target_text:
         return []
 
-    m = re.search(r"#?(\d+)\b", target_text)
-    if m and target_text.replace("#", "").strip().isdigit():
-        item = session.get(Item, int(m.group(1)))
-        return [item] if item and item.deleted_at is None else []
+    def _by_id(item_id: int) -> list[Item] | None:
+        item = session.get(Item, item_id)
+        if item and item.deleted_at is None and (not types or item.type in types):
+            return [item]
+        return None
+
+    # 1) Явная ссылка «#3» в любом месте текста — самый надёжный сигнал.
+    m = re.search(r"#(\d+)\b", target_text)
+    if m:
+        hit = _by_id(int(m.group(1)))
+        if hit is not None:
+            return hit
+
+    # 2) Короткая ссылка вида «3», «задача 3», «задачу №3» — когда номер и есть вся цель.
+    bare = re.fullmatch(
+        r"(?:задач[ауиеой]*\s*)?(?:№|#)?\s*(\d{1,6})", target_text.strip(), re.IGNORECASE
+    )
+    if bare:
+        hit = _by_id(int(bare.group(1)))
+        if hit is not None:
+            return hit
 
     words = [w for w in re.findall(r"[а-яёa-z0-9]{3,}", target_text.lower())]
     if not words:

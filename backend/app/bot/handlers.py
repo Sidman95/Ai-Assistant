@@ -40,6 +40,7 @@ ocr = OCRClient()
 # Состояние «ожидаю текст правки» и незакреплённые медиа (живут до рестарта)
 EDIT_STATE: dict[int, list[int]] = {}
 PENDING_MEDIA: dict[str, dict] = {}
+PROGRESS_PENDING: dict[int, dict] = {}
 
 HELP_TEXT = """Я — твой личный ассистент задач. Просто пиши, наговаривай или фотографируй — я разберу и сохраню.
 
@@ -47,8 +48,11 @@ HELP_TEXT = """Я — твой личный ассистент задач. Пр�
 • «завтра сдать отчёт и позвонить в ЦОД» → две задачи
 • «идея: сделать подсветку на кухне» → идея
 • «ДР Иры 21 июля» → заметка с ежегодным повтором
-• «отметь отчёт как готово» → смена статуса
+• «отметь отчёт как готово» / «#3 готово» → смена статуса
+• «#3 частично: сделал первую часть, осталась вторая» → запись в хронологию, задача остаётся активной
 • «что у меня по дому?» → выборка по сфере
+
+Ссылаться на запись удобнее по номеру: #3 (номер показан на карточке).
 
 Команды (работают всегда, без ИИ):
 /plan — план на день
@@ -193,24 +197,73 @@ async def _send_report(message: Message):
     await message.answer(text)
 
 
+def _recent_active_tasks(s, limit: int = 6):
+    return items_svc.find_items(s, types=["task"], status="active", limit=limit)
+
+
 async def _change_status(message: Message, target: str, new_status: str, delegated_to: str | None):
     with db_session() as s:
         types = ["task"] if new_status in ("done", "cancelled", "delegated") else None
         candidates = ingest.resolve_target(s, target, types=types)
-        if not candidates:
-            await message.answer(f"Не нашёл запись по «{target}». Попробуй /find или укажи #номер.")
-            return
         if len(candidates) == 1:
             item = items_svc.set_status(s, candidates[0], new_status, delegated_to, actor="ai")
             await message.answer(
                 f"Готово: «{item.title}» → {STATUS_NAMES.get(new_status, new_status)} ✅"
             )
             return
+        # Ноль совпадений — не тупик: показываем последние активные задачи
+        if not candidates:
+            candidates = _recent_active_tasks(s)
+            if not candidates:
+                await message.answer("Активных задач нет.")
+                return
+            prompt = "Не понял, какую именно. Выбери задачу:"
+        else:
+            prompt = "Уточни, какую запись:"
         rows = [
             [(f"#{c.id} {(c.title or '')[:40]}", f"st:{c.id}:{new_status}")]
-            for c in candidates[:5]
+            for c in candidates[:6]
         ]
-    await message.answer("Уточни, какую запись:", reply_markup=_kb(rows))
+    await message.answer(prompt, reply_markup=_kb(rows))
+
+
+# ---------- Отчёт о прогрессе (частичное выполнение) ----------
+
+def _apply_progress(s, item: Item, note: str, reschedule: str | None) -> None:
+    if note:
+        items_svc.add_comment(s, item, note, actor="ai")
+    if reschedule:
+        items_svc.update_item(s, item, {"deadline": reschedule}, actor="ai")
+
+
+def _progress_reply(item: Item, reschedule: str | None) -> str:
+    txt = f"📝 Отметил в хронологии #{item.id} «{item.title}». Задача осталась активной."
+    if reschedule:
+        txt += f"\n⏰ Дедлайн перенесён на {reschedule}."
+    return txt
+
+
+async def _handle_progress(message: Message, result: dict, full_text: str):
+    target = result.get("target") or ""
+    note = (result.get("note") or "").strip() or full_text.strip()
+    reschedule = result.get("reschedule")
+    with db_session() as s:
+        candidates = ingest.resolve_target(s, target, types=["task"])
+        if len(candidates) == 1:
+            _apply_progress(s, candidates[0], note, reschedule)
+            await message.answer(_progress_reply(candidates[0], reschedule))
+            return
+        if not candidates:
+            candidates = _recent_active_tasks(s)
+            if not candidates:
+                await message.answer("Активных задач нет — добавить прогресс не к чему.")
+                return
+            prompt = "К какой задаче добавить прогресс?"
+        else:
+            prompt = "Уточни, к какой задаче:"
+        PROGRESS_PENDING[message.from_user.id] = {"note": note, "reschedule": reschedule}
+        rows = [[(f"#{c.id} {(c.title or '')[:40]}", f"prg:{c.id}")] for c in candidates[:6]]
+    await message.answer(prompt, reply_markup=_kb(rows))
 
 
 # ============================ Ingest ============================
@@ -284,6 +337,8 @@ async def _process_text(message: Message, text: str, media: tuple[str, str] | No
         if status not in ("done", "cancelled", "delegated", "active"):
             status = "done"
         await _change_status(message, result.get("target") or text, status, result.get("delegated_to"))
+    elif intent == "progress":
+        await _handle_progress(message, result, text)
     elif intent == "query":
         await _handle_query(message, result)
     elif intent == "edit":
@@ -361,20 +416,25 @@ async def _handle_edit_intent(message: Message, result: dict, today: str):
     changes = result.get("changes") or {}
     with db_session() as s:
         candidates = ingest.resolve_target(s, target)
+        if len(candidates) == 1:
+            item = items_svc.update_item(s, candidates[0], changes, actor="ai")
+            await message.answer("Обновил:\n\n" + item_card(item))
+            return
+        # Ноль совпадений — предлагаем последние активные задачи вместо тупика
         if not candidates:
-            await message.answer(f"Не нашёл запись по «{target}». Уточни или используй /find.")
-            return
-        if len(candidates) > 1:
-            rows = [
-                [(f"#{c.id} {(c.title or '')[:40]}", f"pick_edit:{c.id}")]
-                for c in candidates[:5]
-            ]
-            # запомним изменения до выбора
-            EDIT_PENDING_CHANGES[message.from_user.id] = changes
-            await message.answer("Уточни, какую запись изменить:", reply_markup=_kb(rows))
-            return
-        item = items_svc.update_item(s, candidates[0], changes, actor="ai")
-        await message.answer("Обновил:\n\n" + item_card(item))
+            candidates = _recent_active_tasks(s)
+            if not candidates:
+                await message.answer("Не нашёл, что изменить. Уточни #номер или используй /find.")
+                return
+            prompt = "Не понял, что изменить. Выбери запись:"
+        else:
+            prompt = "Уточни, какую запись изменить:"
+        EDIT_PENDING_CHANGES[message.from_user.id] = changes
+        rows = [
+            [(f"#{c.id} {(c.title or '')[:40]}", f"pick_edit:{c.id}")]
+            for c in candidates[:6]
+        ]
+        await message.answer(prompt, reply_markup=_kb(rows))
 
 
 EDIT_PENDING_CHANGES: dict[int, dict] = {}
@@ -483,6 +543,23 @@ async def cb_status(query: CallbackQuery):
         await query.message.edit_text(
             f"Готово: «{item.title}» → {STATUS_NAMES.get(status, status)} ✅"
         )
+    await query.answer()
+
+
+@router.callback_query(F.data.startswith("prg:"))
+async def cb_progress(query: CallbackQuery):
+    iid = int(query.data.split(":", 1)[1])
+    pending = PROGRESS_PENDING.pop(query.from_user.id, None)
+    if not pending:
+        await query.answer("Устарело, повтори сообщение.", show_alert=True)
+        return
+    with db_session() as s:
+        item = s.get(Item, iid)
+        if not item:
+            await query.answer("Не найдено")
+            return
+        _apply_progress(s, item, pending["note"], pending["reschedule"])
+        await query.message.edit_text(_progress_reply(item, pending["reschedule"]))
     await query.answer()
 
 

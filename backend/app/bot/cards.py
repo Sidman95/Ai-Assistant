@@ -19,7 +19,7 @@ def item_card(item: Item) -> str:
     """Компактная карточка записи."""
     lines = [f"{TYPE_ICONS.get(item.type, '•')} {TYPE_NAMES.get(item.type)} #{item.id}: {item.title or '(без названия)'}"]
     if item.description and item.description != item.title:
-        desc = item.description if len(item.description) <= 200 else item.description[:200] + "…"
+        desc = item.description if len(item.description) <= 140 else item.description[:140] + "…"
         lines.append(desc)
     details = []
     if item.type == "task" and item.priority:
