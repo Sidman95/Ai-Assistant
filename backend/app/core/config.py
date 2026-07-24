@@ -39,9 +39,14 @@ class Config:
     files_dir: str = field(default_factory=lambda: _env("FILES_DIR", "./data/files"))
 
     def resolved_llm(self) -> tuple[str, str, str]:
-        """(base_url, model, api_key) с дефолтом на YandexGPT."""
+        """(base_url, model, api_key) с дефолтом на YandexGPT Pro.
+
+        Полная модель `yandexgpt` заметно надёжнее `yandexgpt-lite` в разборе
+        (даты, намерения, структурный JSON). Для экономии можно вернуть lite
+        через LLM_MODEL в .env.
+        """
         base_url = self.llm_base_url or "https://llm.api.cloud.yandex.net/v1"
-        model = self.llm_model or f"gpt://{self.yc_folder_id}/yandexgpt-lite/latest"
+        model = self.llm_model or f"gpt://{self.yc_folder_id}/yandexgpt/latest"
         api_key = self.llm_api_key or self.yc_api_key
         return base_url, model, api_key
 
