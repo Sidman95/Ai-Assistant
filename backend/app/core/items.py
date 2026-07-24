@@ -1,7 +1,7 @@
 """CRUD и операции над сущностями (FR-9…FR-16). Общая логика бота и веба."""
 from __future__ import annotations
 
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -39,6 +39,42 @@ def parse_date(value: str | None) -> date | None:
         return date.fromisoformat(value[:10])
     except ValueError:
         return None
+
+
+# Дни недели: (номер weekday, regex по корню словоформы)
+_WEEKDAY_PATTERNS = [
+    (0, r"понедельник"),
+    (1, r"вторник"),
+    (2, r"сред[ауыое]"),
+    (3, r"четверг"),
+    (4, r"пятниц[ауые]"),
+    (5, r"суббот[ауые]"),
+    (6, r"воскресень[еяю]|воскр\b"),
+]
+
+
+def parse_relative_date(text: str | None, today: date) -> date | None:
+    """Вычисляет дату из относительных слов надёжнее, чем LLM.
+
+    «сегодня/завтра/послезавтра» и дни недели («на понедельник» → ближайший
+    будущий понедельник; если сегодня и есть этот день — сегодня).
+    """
+    if not text:
+        return None
+    import re as _re
+
+    t = text.lower()
+    if _re.search(r"послезавтра", t):
+        return today + timedelta(days=2)
+    if _re.search(r"\bзавтра", t):
+        return today + timedelta(days=1)
+    if _re.search(r"\bсегодня", t):
+        return today
+    for wd, pat in _WEEKDAY_PATTERNS:
+        if _re.search(pat, t):
+            days_ahead = (wd - today.weekday()) % 7
+            return today + timedelta(days=days_ahead)
+    return None
 
 
 def get_or_create_tag(session: Session, name: str) -> Tag:

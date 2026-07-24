@@ -6,8 +6,9 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .items import create_item, find_items
+from .items import create_item, find_items, parse_relative_date
 from .models import Item, Tag
+from .timeutil import today_local
 
 
 def known_tags(session: Session) -> list[str]:
@@ -25,16 +26,49 @@ def project_titles(session: Session) -> list[str]:
     ]
 
 
+def _project_mentioned(project_name: str, source_text: str | None) -> bool:
+    """Проект принимаем, только если он реально упомянут в тексте пользователя.
+
+    Защита от галлюцинаций LLM, которая любит прицепить единственный
+    существующий проект, даже если пользователь его не называл.
+    """
+    if not project_name or not source_text:
+        return False
+    src = source_text.lower()
+    name = project_name.lower().strip()
+    if name and name in src:
+        return True
+    tokens = [w for w in re.findall(r"[а-яёa-z0-9]{3,}", name)]
+    return any(tok in src for tok in tokens)
+
+
 def apply_new_items(
     session: Session, items_data: list[dict], source_text: str | None, actor: str = "ai"
 ) -> list[Item]:
     """Создание записей из структурированного извлечения LLM (FR-5, FR-6)."""
+    items_data = [d for d in items_data[:10] if isinstance(d, dict)]
+
+    # Относительные даты («понедельник», «завтра») считаем детерминированно —
+    # LLM часто ошибается в дне недели. Применяем только для одиночного ввода,
+    # чтобы не перепутать даты в сообщении с несколькими делами.
+    rel_date = None
+    if len(items_data) == 1:
+        rel_date = parse_relative_date(source_text, today_local(session))
+
     created: list[Item] = []
-    for data in items_data[:10]:  # разумный предел на один ввод
-        if not isinstance(data, dict):
-            continue
+    for data in items_data:
         data = dict(data)
         data["source_text"] = source_text
+
+        # Гейт проекта: сбрасываем, если он не упомянут в исходном тексте
+        if data.get("project") and not _project_mentioned(str(data["project"]), source_text):
+            data["project"] = None
+        data.pop("project_id", None)
+
+        # Перекрываем дедлайн вычисленной относительной датой (task/project)
+        if rel_date and data.get("type") in ("task", "project"):
+            data["deadline"] = rel_date.isoformat()
+
         created.append(create_item(session, data, actor=actor))
     return created
 
