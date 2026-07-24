@@ -39,15 +39,23 @@ class Config:
     files_dir: str = field(default_factory=lambda: _env("FILES_DIR", "./data/files"))
 
     def resolved_llm(self) -> tuple[str, str, str]:
-        """(base_url, model, api_key) с дефолтом на YandexGPT Pro.
+        """(base_url, model, api_key) с дефолтом на Yandex AI Studio.
 
-        Полная модель `yandexgpt` заметно надёжнее `yandexgpt-lite` в разборе
-        (даты, намерения, структурный JSON). Для экономии можно вернуть lite
-        через LLM_MODEL в .env.
+        LLM_MODEL можно задавать:
+          • пустым — берётся дефолт (DeepSeek V4 Flash: дешевле lite, сильнее в разборе);
+          • коротким именем модели из AI Studio («deepseek-v4-flash», «yandexgpt»,
+            «yandexgpt-lite», «qwen3-235b») — код сам соберёт полный gpt://-URI;
+          • полным идентификатором («gpt://<folder>/.../latest») — используется как есть.
+        Для внешнего провайдера (DeepSeek API, Ollama) задайте LLM_BASE_URL —
+        тогда LLM_MODEL передаётся как есть.
         """
         base_url = self.llm_base_url or "https://llm.api.cloud.yandex.net/v1"
-        model = self.llm_model or f"gpt://{self.yc_folder_id}/yandexgpt/latest"
         api_key = self.llm_api_key or self.yc_api_key
+
+        model = self.llm_model or "deepseek-v4-flash"
+        # Короткое имя модели AI Studio → полный URI (только для Yandex-endpoint)
+        if "://" not in model and not self.llm_base_url:
+            model = f"gpt://{self.yc_folder_id}/{model}/latest"
         return base_url, model, api_key
 
 
