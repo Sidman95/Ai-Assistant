@@ -208,6 +208,7 @@ STT/OCR при этом продолжают работать через Yandex 
 | «ИИ сейчас недоступен» | `YC_API_KEY`/`YC_FOLDER_ID`, роли сервисного аккаунта, активирован ли биллинг; `docker compose logs bot | grep -i llm` |
 | Голос/фото не распознаются | роли `ai.speechkit-stt.user` / `ai.vision.user` у сервисного аккаунта |
 | Веб не открывается | `docker compose ps`; порт 80 открыт в firewall; `docker compose logs nginx web` |
+| Конфликт портов с VPN/другим сервисом (напр. Amnezia на 443) | nginx не может занять 80/443 и уходит в рестарт-цикл, ломая и себя, и VPN. Проверить: `sudo ss -tlnp \| grep -E ':(80\|443) '` и `docker compose logs nginx`. Решение: задать в `.env` свободные `HTTP_PORT`/`HTTPS_PORT` (напр. 8080/8443) и `docker compose up -d nginx`; веб откроется по `http://<IP>:8080` |
 | Неверный логин в вебе | пользователь создаётся из `.env` при **первом** запуске; для сброса пароля: `docker compose exec web python -c "import sys; sys.path.insert(0,'/srv'); from app.web.auth import hasher; from app.core.database import db_session, init_db; from app.core.models import User; from sqlalchemy import select; init_db(); s=db_session().__enter__(); u=s.execute(select(User)).scalar_one(); u.password_hash=hasher.hash('НОВЫЙ_ПАРОЛЬ'); s.commit(); print('ok')"` |
 | Утренний отчёт не приходит | включён ли он (в вебе «Настройки» или `/settings` в TG); часовой пояс; `docker compose logs bot` |
 

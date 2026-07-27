@@ -35,9 +35,11 @@ services:
       context: .
       dockerfile: nginx/Dockerfile
     restart: unless-stopped
+    # Порты хоста настраиваются в .env. Если на сервере уже есть VPN
+    # (например Amnezia на 443) — задайте HTTP_PORT/HTTPS_PORT, чтобы не конфликтовать.
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot
